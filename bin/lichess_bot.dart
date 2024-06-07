@@ -22,7 +22,7 @@ void main(List<String> arguments) async {
   LichessAPIWrapper lichess = LichessAPIWrapper(lines.first);
   lichess.upgradeToBot();
   for (NowPlayingGame game in await lichess.getGamesPlaying()) {
-    playGame(lichess, game.gameID);
+    playGame(lichess, game.gameID, lines.last);
   }
   lichess.streamUserEvents().listen((e) {
     if (e is LichessChallengeEvent &&
@@ -32,20 +32,20 @@ void main(List<String> arguments) async {
       } else {
         lichess.acceptChallenge(e.challenge.id).then((e2) {
           String gameID = e.challenge.id;
-          playGame(lichess, gameID);
+          playGame(lichess, gameID, lines.last);
         });
       }
     }
   });
 }
 
-void playGame(LichessAPIWrapper lichess, String gameID) {
+void playGame(LichessAPIWrapper lichess, String gameID, String user) {
   late LichessColor color;
   late Position chess;
   lichess.streamGameState(gameID).listen((e) {
     try {
       if (e is LichessGameFullEvent) {
-        color = e.white.name == 'bushbowl'
+        color = e.white.name == user
             ? LichessColor.white
             : LichessColor.black;
         chess = Position.setupPosition(
