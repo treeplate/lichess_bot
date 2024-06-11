@@ -29,6 +29,12 @@ typedef NowPlayingGame = ({
 
 enum ChallengeRule { noAbort, noRematch, noGiveTime, noClaimWin, noEarlyDraw }
 
+class ApiError  {
+  final String message;
+
+  ApiError(this.message);
+}
+
 /// This class attempts to match the API available using https://github.com/lichess-bot-devs/lichess-bot.
 class LichessAPIWrapper {
   final String token;
@@ -44,7 +50,7 @@ class LichessAPIWrapper {
         queryParameters: queryParams);
     var headers = {'Authorization': 'Bearer $token'};
     return get(uri, headers: headers).then((response) {
-      if (response.statusCode != 200) throw('Error using $endpoint: ${response.body}');
+      if (response.statusCode != 200) throw ApiError('Error using $endpoint: ${response.body}');
       return response.body;
     });
   }
@@ -59,7 +65,7 @@ class LichessAPIWrapper {
     );
     var headers = {'Authorization': 'Bearer $token'};
     return post(uri, headers: headers, body: body).then((response) {
-      if (response.statusCode != 200) throw('Error using $endpoint: ${response.body}');
+      if (response.statusCode != 200) throw ApiError('Error using $endpoint: ${response.body}');
       return response.body;
     });
   }
