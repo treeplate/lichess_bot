@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:lichess_bot/lichess_bot.dart';
-import 'package:dartchess/dartchess.dart';
+import 'package:dartchess/dartchess.dart' hide File;
 
 const Map<LichessVariantKey, Rule> variantToRule = {
   LichessVariantKey.standard: Rule.chess,
@@ -53,52 +53,58 @@ void playGame(LichessAPIWrapper lichess, String gameID, String user) {
                 : Setup.parseFen(e.initialFen));
         if (e.state.moves.isNotEmpty) {
           for (String move in e.state.moves.split(' ')) {
-            position = position.play(Move.fromUci(move)!);
+            position = position.play(Move.parse(move)!);
           }
         }
       } else if (e is LichessGameStateEvent) {
-        position = position.play(Move.fromUci(e.moves.split(' ').last)!);
+        position = position.play(Move.parse(e.moves.split(' ').last)!);
       } else if (e is LichessChatLineEvent) {
+        print(e.text);
         if (e.text == 'eval') {
           lichess.sendChat(gameID, readableEval(position, 1),
               e.room == LichessChatLineRoom.player);
         } else if (e.text.startsWith('eval ')) {
           try {
-            Position newPos = position.play(Move.fromUci(e.text.substring(5))!);
+            Position newPos = position.play(Move.parse(e.text.substring(5))!);
             lichess.sendChat(gameID, readableEval(newPos, 1),
                 e.room == LichessChatLineRoom.player);
-          } on PlayError catch (err) {
+          } on PlayException catch (err) {
             lichess.sendChat(
                 gameID, err.message, e.room == LichessChatLineRoom.player);
           }
         } else if (e.text.startsWith('evald')) {
           try {
-            Position newPos = e.text.length > 6 ? position.play(Move.fromUci(e.text.substring(7))!) : position;
+            Position newPos = e.text.length > 6
+                ? position.play(Move.parse(e.text.substring(7))!)
+                : position;
             lichess.sendChat(gameID, readableEval(newPos, int.parse(e.text[5])),
                 e.room == LichessChatLineRoom.player);
-          } on PlayError catch (err) {
+          } on PlayException catch (err) {
             lichess.sendChat(
                 gameID, err.message, e.room == LichessChatLineRoom.player);
           } on FormatException catch (err) {
             lichess.sendChat(
                 gameID, err.message, e.room == LichessChatLineRoom.player);
-          }  on TypeError catch (err) {
+          } on TypeError catch (err) {
             lichess.sendChat(
                 gameID, '$err', e.room == LichessChatLineRoom.player);
           }
         } else if (e.text == 'best') {
-          lichess.sendChat(gameID, pickMove(position, 1).$1.uci,
+          lichess.sendChat(gameID, pickMove(position, 2).$1.uci,
+              e.room == LichessChatLineRoom.player);
+        } else if (e.text == 'worst') {
+          lichess.sendChat(gameID, pickWorstMove(position, 2).$1.uci,
               e.room == LichessChatLineRoom.player);
         }
       }
       if (!position.isGameOver &&
           (position.turn == Side.white) == (color == LichessColor.white)) {
-        (Move, bool) move = pickMove(position, 1);
+        (Move, bool) move = pickMove(position, 2);
         lichess.makeMove(gameID, move.$1.uci, move.$2);
       }
-    } on FenError catch (e) {
-      print(e.message);
-    } on PlayError {
+    } on FenException catch (e) {
+      print(e.cause);
+    } on PlayException {
       // three-move repetition is buggy
     } on ApiError catch (e) {
       print(e.message);
@@ -112,7 +118,7 @@ String readableEval(Position position, int maxDepth) {
 }
 
 // returns (move, offering draw)
-(Move, bool) pickMove(Position position, int maxDepth) {
+(Move, bool) pickMove(Position position, int maxDepth,) {
   Iterable<Move> validMoves = position.legalMoves.entries
       .expand((e) => e.value.squares.map((f) => NormalMove(from: e.key, to: f)))
       .followedBy(position.legalDrops.squares.expand((e) {
@@ -126,7 +132,28 @@ String readableEval(Position position, int maxDepth) {
   }));
   Move bestMove = validMoves.first;
   for (Move move in validMoves) {
-    if (compareMoves(position, move, bestMove, maxDepth) < 0) {
+    if (compareMoves(position, bestMove, move, maxDepth) > 0) {
+      bestMove = move;
+    }
+  }
+  return (bestMove, false);
+}
+
+(Move, bool) pickWorstMove(Position position, int maxDepth,) {
+  Iterable<Move> validMoves = position.legalMoves.entries
+      .expand((e) => e.value.squares.map((f) => NormalMove(from: e.key, to: f)))
+      .followedBy(position.legalDrops.squares.expand((e) {
+    if (position.pockets?.value[position.turn] != null) {
+      List<Move> moves = [];
+      for (Role role in position.pockets!.value[position.turn]!.keys) {
+        moves.add(DropMove(to: e, role: role));
+      }
+    }
+    return [];
+  }));
+  Move bestMove = validMoves.first;
+  for (Move move in validMoves) {
+    if (compareMoves(position, bestMove, move, maxDepth) < 0) {
       bestMove = move;
     }
   }
@@ -156,13 +183,32 @@ double evaluatePosition(Position position, int maxDepth) {
     return -evaluatePosition(
         position.play(pickMove(position, maxDepth - 1).$1), maxDepth - 1);
   }
-  return position.board.pieces
+  double value = position.board.pieces
       .map<double>((e) => e.$2.color == position.turn
           ? pieceTypeScore[e.$2.role]!
           : -pieceTypeScore[e.$2.role]!)
-      .reduce((a, b) => a + b);
+      .reduce((a, b) => a + b)*10;
+  for ((Square, Piece) piece in position.board.pieces) {
+    if (piece.$2.role == Role.pawn) {
+      if (piece.$2.color == position.turn) {
+        if (position.turn == Side.white) {
+          value += (piece.$1 ~/ 8);
+        } else {
+          value += (8-piece.$1 ~/ 8);
+        }
+      } else {
+        if (piece.$2.color == Side.white) {
+          value += -(piece.$1 ~/ 8);
+        } else {
+          value += -(8-piece.$1 ~/ 8);
+        }
+      }
+    }
+  }
+  return value/10;
 }
 
+/// positive: b>a, negative: a>b
 int compareMoves(Position position, Move a, Move b, int maxDepth) {
   Position aPos = position.play(a);
   Position bPos = position.play(b);

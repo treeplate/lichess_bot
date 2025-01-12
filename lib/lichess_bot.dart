@@ -29,9 +29,10 @@ typedef NowPlayingGame = ({
 
 enum ChallengeRule { noAbort, noRematch, noGiveTime, noClaimWin, noEarlyDraw }
 
-class ApiError  {
+class ApiError {
   final String message;
-
+  @override
+  String toString() => 'APIError: $message';
   ApiError(this.message);
 }
 
@@ -50,7 +51,10 @@ class LichessAPIWrapper {
         queryParameters: queryParams);
     var headers = {'Authorization': 'Bearer $token'};
     return get(uri, headers: headers).then((response) {
-      if (response.statusCode != 200) throw ApiError('Error using $endpoint: ${response.body}');
+      if (response.statusCode != 200) {
+        Map<String, dynamic> json = jsonDecode(response.body);
+        throw ApiError('Error using $endpoint: ${json['error'] ?? response.body}');
+      }
       return response.body;
     });
   }
@@ -65,7 +69,10 @@ class LichessAPIWrapper {
     );
     var headers = {'Authorization': 'Bearer $token'};
     return post(uri, headers: headers, body: body).then((response) {
-      if (response.statusCode != 200) throw ApiError('Error using $endpoint: ${response.body}');
+      if (response.statusCode != 200) {
+        Map<String, dynamic> json = jsonDecode(response.body);
+        throw ApiError('Error using $endpoint: ${json['error'] ?? response.body}');
+      }
       return response.body;
     });
   }
@@ -215,9 +222,11 @@ class LichessAPIWrapper {
   }
 
   Future<bool> makeMove(String game, String move, bool offeringDraw) async {
-    return jsonDecode(await _apiPostRequest('api/bot/game/$game/move/$move', null, {
-      'offeringDraw': [offeringDraw.toString()]
-    }))['ok'] == true;
+    return jsonDecode(
+            await _apiPostRequest('api/bot/game/$game/move/$move', null, {
+          'offeringDraw': [offeringDraw.toString()]
+        }))['ok'] ==
+        true;
   }
 
   // untested
@@ -273,12 +282,13 @@ class LichessAPIWrapper {
       'api/challenge/$opponent',
       {
         'rated': rated.toString(),
-        if(clock.limit != null) 'clock.limit': clock.limit.toString(),
-         if(clock.increment != null)'clock.increment': clock.increment.toString(),
-        if(clock.daysPerTurn != null) 'days': clock.daysPerTurn.toString(),
+        if (clock.limit != null) 'clock.limit': clock.limit.toString(),
+        if (clock.increment != null)
+          'clock.increment': clock.increment.toString(),
+        if (clock.daysPerTurn != null) 'days': clock.daysPerTurn.toString(),
         'color': color?.name ?? 'random',
         'variant': variant.name,
-        if(initialFen != null) 'fen': initialFen,
+        if (initialFen != null) 'fen': initialFen,
         'rules': rules.map((e) => e.name).join(','),
       },
     ).then((response) {
