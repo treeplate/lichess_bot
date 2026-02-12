@@ -292,7 +292,7 @@ class LichessAPIWrapper {
         'rules': rules.map((e) => e.name).join(','),
       },
     ).then((response) {
-      return jsonDecode(response)['challenge']['id'];
+      return jsonDecode(response)['id'];
     });
   }
 
